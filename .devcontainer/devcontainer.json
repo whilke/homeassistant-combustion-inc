@@ -53,5 +53,13 @@
 			}
 		}
 	},
+	"runArgs": [
+		"--privileged"
+	],
+	"mounts": [
+		// Mount host D-Bus system bus (needed for BlueZ) if present; ignore errors if missing
+		"type=bind,source=/run/dbus,target=/run/dbus,readonly"
+	],
+	"overrideCommand": false,
 	"appPort": 8123
 }
