@@ -6,3 +6,4 @@ combustion_custom/__pycache__
 *.pyc
 !config/configuration.yaml
 default
+.coverage
