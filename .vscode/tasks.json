@@ -1,0 +1,65 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Home Assistant",
+            "type": "shell",
+            "command": "hass",
+            "args": ["-c", "config", "--debug"],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Run Home Assistant (skip pip)",
+            "type": "shell",
+            "command": "hass",
+            "args": ["-c", "config", "--debug", "--skip-pip"],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Check Bluetooth Status",
+            "type": "shell",
+            "command": "bluetoothctl show && echo '---' && hciconfig -a",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Scan for BLE Devices",
+            "type": "shell",
+            "command": "timeout 10 bluetoothctl scan on || true",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Run Tests",
+            "type": "shell",
+            "command": "pytest",
+            "args": ["tests/", "-v"],
+            "problemMatcher": [],
+            "group": "test"
+        },
+        {
+            "label": "Install Dependencies",
+            "type": "shell",
+            "command": "pip install -r requirements.txt && pip install -r requirements.test.txt",
+            "problemMatcher": []
+        }
+    ]
+}

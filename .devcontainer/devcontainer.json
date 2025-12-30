@@ -1,65 +1,63 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/python
+// For format details, see https://aka.ms/devcontainer.json
+// Home Assistant Custom Component Development Container with Bluetooth Support
 {
-	"name": "Python 3",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:1-3.13",
+	"name": "Home Assistant Custom Component Dev",
+	"image": "mcr.microsoft.com/devcontainers/python:1-3.13-bookworm",
+
+	// Bluetooth support - requires host system access
+	"runArgs": [
+		"--privileged",
+		"-e", "GIT_EDITOR=code --wait"
+	],
+
+	// Mount D-Bus for Bluetooth
+	"mounts": [
+		"source=/var/run/dbus,target=/var/run/dbus,type=bind"
+	],
+
+	// Install Bluetooth dependencies
 	"features": {
-		"ghcr.io/devcontainers-extra/features/pylint:2": {}
+		"ghcr.io/devcontainers/features/common-utils:2": {}
 	},
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && git config --global user.email \"${localEnv:GIT_EMAIL}\" && git config --global user.name \"${localEnv:GIT_NAME}\" && pip3 install --user -r requirements.txt",
-	// Configure tool-specific properties.
-	// "customizations": {},
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
-	// Customizations
+
+	// Port mapping for Home Assistant (use appPort for Docker-native mapping)
+	"appPort": ["8123:8123"],
+
+	// Post-create setup
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+
+	// Post-start to ensure D-Bus is available
+	"postStartCommand": "sudo service dbus start 2>/dev/null || true",
+
 	"customizations": {
 		"vscode": {
 			"extensions": [
 				"ms-python.python",
-				"ms-python.pylint",
+				"ms-python.debugpy",
+				"ms-python.vscode-pylance",
 				"github.vscode-pull-request-github",
 				"ryanluker.vscode-coverage-gutters",
-				"ms-python.vscode-pylance"
+				"redhat.vscode-yaml"
 			],
 			"settings": {
 				"terminal.integrated.defaultProfile.linux": "bash",
-				"terminal.integrated.profiles.linux": {
-					"bash": {
-						"path": "bash",
-						"icon": "terminal-bash"
-					}
-				},
 				"files.eol": "\n",
 				"editor.tabSize": 4,
-				"python.pythonPath": "/usr/bin/python3",
-				"python.analysis.autoSearchPaths": false,
-				// This makes sure the home assistant types are loaded into the editor
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.analysis.autoSearchPaths": true,
 				"python.analysis.extraPaths": [
-					"/home/vscode/.local/lib/python3.10/site-packages/"
+					"${containerWorkspaceFolder}/custom_components"
 				],
-				"python.linting.pylintEnabled": true,
-				"python.linting.enabled": true,
-				"python.formatting.provider": "black",
-				"editor.formatOnPaste": false,
 				"editor.formatOnSave": true,
-				"editor.formatOnType": true,
-				"files.trimTrailingWhitespace": true
+				"files.trimTrailingWhitespace": true,
+				"python.testing.pytestEnabled": true,
+				"python.testing.pytestArgs": ["tests"]
 			}
 		}
 	},
-	"runArgs": [
-		"--privileged"
-	],
-	"mounts": [
-		// Mount host D-Bus system bus (needed for BlueZ) if present; ignore errors if missing
-		"type=bind,source=/run/dbus,target=/run/dbus,readonly"
-	],
-	"overrideCommand": false,
-	"appPort": 8123
+
+	"containerEnv": {
+		"PYTHONPATH": "${containerWorkspaceFolder}",
+		"DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/var/run/dbus/system_bus_socket"
+	}
 }
