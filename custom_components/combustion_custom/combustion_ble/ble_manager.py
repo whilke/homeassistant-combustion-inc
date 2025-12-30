@@ -10,8 +10,10 @@ from bleak import (
 )
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
+from bleak_retry_connector import establish_connection
 
-from .ble_data.advertising_data import AdvertisingData
+from .ble_data.advertising_data import AdvertisingData, CombustionProductType
+from .ble_data.gauge_advertising_data import GaugeAdvertisingData
 from .ble_data.probe_status import ProbeStatus
 from .const import (
     BT_MANUFACTURER_ID,
@@ -45,6 +47,11 @@ class BleManagerDelegate:
 
     def update_device_with_advertising(
         self, advertising: AdvertisingData, is_connectable: bool, rssi: int, identifier: str
+    ):
+        pass
+
+    def update_device_with_gauge_advertising(
+        self, advertising: GaugeAdvertisingData, is_connectable: bool, rssi: int, identifier: str
     ):
         pass
 
@@ -107,6 +114,7 @@ class BleManager:
 
     def __init__(self):
         self.clients: dict[str, BleakClient] = {}
+        self.ble_devices: dict[str, BLEDevice] = {}
         self.scanner: Optional[BleakScanner] = None
         self.delegate: Optional[BleManagerDelegate] = None
         self.device_status_characteristics: dict[str, BleakGATTCharacteristic] = {}
@@ -166,9 +174,29 @@ class BleManager:
         if BT_MANUFACTURER_ID not in advertisement_data.manufacturer_data:
             return
 
-        advertising_data = AdvertisingData.from_bleak_data(
-            advertisement_data.manufacturer_data[BT_MANUFACTURER_ID]
-        )
+        # Store the BLEDevice for use with establish_connection
+        self.ble_devices[device.address] = device
+
+        msd_payload = advertisement_data.manufacturer_data[BT_MANUFACTURER_ID]
+
+        # Peek product type byte (offset 2 in full MSD, but Bleak omits vendor id).
+        # Full MSD format: [vendor_id(2)][product_type(1)]...
+        if len(msd_payload) < 1:
+            return
+
+        product_type_byte = msd_payload[0]
+        if product_type_byte == CombustionProductType.GAUGE.value:
+            gauge_adv = GaugeAdvertisingData.from_bleak_data(msd_payload)
+            if gauge_adv and self.delegate:
+                self.delegate.update_device_with_gauge_advertising(
+                    advertising=gauge_adv,
+                    is_connectable=True,  # TODO: support non-connectable devices
+                    rssi=advertisement_data.rssi,
+                    identifier=device.address,
+                )
+            return
+
+        advertising_data = AdvertisingData.from_bleak_data(msd_payload)
         if advertising_data and self.delegate:
             self.delegate.update_device_with_advertising(
                 advertising=advertising_data,
@@ -185,18 +213,29 @@ class BleManager:
 
         if identifier in self.clients:
             client = self.clients[identifier]
-        else:
-            client = BleakClient(
-                identifier, disconnected_callback=self.disconnected_callback(identifier)
-            )
+            if client.is_connected:
+                self.delegate.did_connect_to(identifier)
+                return
+
+        ble_device = self.ble_devices.get(identifier)
+        if not ble_device:
+            LOGGER.warning("No BLEDevice found for identifier [%s]", identifier)
+            self.delegate.did_fail_to_connect_to(identifier)
+            return
 
         successful = False
         self._pending_connections.add(identifier)
         try:
-            await client.connect()
+            client = await establish_connection(
+                BleakClient,
+                ble_device,
+                ble_device.name or identifier,
+                disconnected_callback=self.disconnected_callback(identifier),
+            )
             self.clients[identifier] = client
             successful = True
         except Exception as ex:
+            LOGGER.debug("Failed to connect to [%s]: %s", identifier, ex)
             self.delegate.did_fail_to_connect_to(identifier)
         finally:
             self._pending_connections.discard(identifier)

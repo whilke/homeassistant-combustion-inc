@@ -1,8 +1,9 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from .devices.device import Device
+from .logger import LOGGER
 from .utilities.asyncio_utils import ensure_future
 
 if TYPE_CHECKING:
@@ -18,10 +19,56 @@ class ConnectionManager:
         self.connection_timers: dict[str, asyncio.Task] = {}
         self.last_status_update: dict[str, datetime] = {}
         self.PROBE_STATUS_STALE_TIMEOUT = 10.0
+        # Cooldown windows to avoid hammering the BLE stack on repeated failures.
+        self._probe_connect_backoff_until: dict[str, datetime] = {}
+        self._node_connect_backoff_until: dict[str, datetime] = {}
+        self.CONNECT_FAILURE_BACKOFF_SECONDS = 5.0
         self.device_manager = device_manager
+
+    def _in_backoff(self, backoff_map: dict[str, datetime], key: str) -> bool:
+        until = backoff_map.get(key)
+        return bool(until and datetime.now() < until)
+
+    def note_connect_failed(self, device: Device) -> None:
+        until = datetime.now() + timedelta(seconds=self.CONNECT_FAILURE_BACKOFF_SECONDS)
+
+        if hasattr(device, "serial_number_string"):
+            serial = getattr(device, "serial_number_string")
+            if isinstance(serial, str):
+                self._probe_connect_backoff_until[serial] = until
+                LOGGER.debug(
+                    "Backoff probe connect (%s) for %ss",
+                    serial,
+                    self.CONNECT_FAILURE_BACKOFF_SECONDS,
+                )
+                return
+
+        # Fallback: use BLE identifier / unique identifier for nodes
+        key = device.ble_identifier or device.unique_identifier
+        self._node_connect_backoff_until[key] = until
+        LOGGER.debug(
+            "Backoff node connect (%s) for %ss",
+            key,
+            self.CONNECT_FAILURE_BACKOFF_SECONDS,
+        )
+
+    def note_connect_succeeded(self, device: Device) -> None:
+        if hasattr(device, "serial_number_string"):
+            serial = getattr(device, "serial_number_string")
+            if isinstance(serial, str) and serial in self._probe_connect_backoff_until:
+                del self._probe_connect_backoff_until[serial]
+                return
+
+        key = device.ble_identifier or device.unique_identifier
+        if key in self._node_connect_backoff_until:
+            del self._node_connect_backoff_until[key]
 
     def received_probe_advertising(self, probe: Optional["Probe"]):
         if probe is None:
+            return
+
+        # Avoid repeated connect storms if the probe (or the host) is currently refusing connects.
+        if self._in_backoff(self._probe_connect_backoff_until, probe.serial_number_string):
             return
 
         probe_status_stale = True
@@ -59,6 +106,9 @@ class ConnectionManager:
 
     def received_probe_advertising_from_node(self, probe: Optional["Probe"], node: "MeatNetNode"):
         if self.meat_net_enabled:
+            node_key = node.ble_identifier or node.unique_identifier
+            if self._in_backoff(self._node_connect_backoff_until, node_key):
+                return
             ensure_future(node.connect(), "probe.connect[meatnet]")
 
     def received_status_for(self, probe: "Probe", direct_connection: bool):

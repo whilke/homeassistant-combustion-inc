@@ -1,1 +1,7 @@
 homeassistant==2025.6.1
+bleak>=0.21.0
+bleak-retry-connector>=3.0.0
+bluetooth-adapters>=0.16.0
+bluetooth-auto-recovery>=1.2.0
+bluetooth-data-tools>=1.19.0
+habluetooth>=3.0.0

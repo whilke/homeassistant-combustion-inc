@@ -9,6 +9,7 @@ from .ble_data.advertising_data import (
     AdvertisingData,
     CombustionProductType,
 )
+from .ble_data.gauge_advertising_data import GaugeAdvertisingData
 from .ble_data.hop_count import HopCount
 from .ble_data.probe_status import ProbeStatus
 from .ble_manager import BleManager, BleManagerDelegate, BluetoothMode
@@ -360,11 +361,13 @@ class DeviceManager(BleManagerDelegate):
         if not device:
             return
         device._update_connection_state(Device.ConnectionState.CONNECTED)
+        self.connection_manager.note_connect_succeeded(device)
 
     def did_fail_to_connect_to(self, identifier):
         device = self.find_device_by_ble_identifier(identifier)
         if device:
             device._update_connection_state(Device.ConnectionState.FAILED)
+            self.connection_manager.note_connect_failed(device)
 
     def did_disconnect_from(self, identifier: str):
         device = self.find_device_by_ble_identifier(identifier)
@@ -421,13 +424,12 @@ class DeviceManager(BleManagerDelegate):
             new_node = False
             if (meatnet_node := self.devices.get(identifier)) and isinstance(meatnet_node, MeatNetNode):
                 meatnet_node.update_with_advertising(advertising, is_connectable, rssi)
-                
+
             else:
                 # Create node and add to device list
                 meatnet_node = MeatNetNode(advertising, self, is_connectable, rssi, identifier)
                 self._add_device(meatnet_node)
                 new_node = True
-
 
             # Update the probe associated with this advertising data
             probe = self.update_probe_with_advertising(
@@ -442,6 +444,27 @@ class DeviceManager(BleManagerDelegate):
                     self.connection_manager.received_probe_advertising_from_node(
                         probe, meatnet_node
                     )
+
+    def update_device_with_gauge_advertising(
+        self, advertising: GaugeAdvertisingData, is_connectable: bool, rssi: int, identifier: str
+    ):
+        """Handle Gauge-specific advertisements.
+
+        Gauges behave like MeatNet Nodes (repeaters) but also emit Gauge-specific MSD.
+        We represent a Gauge as a MeatNetNode with extra Gauge fields.
+        """
+        if not self.connection_manager.meat_net_enabled:
+            return
+
+        node = self.devices.get(identifier)
+        if node and isinstance(node, MeatNetNode):
+            node.update_with_gauge_advertising(advertising, is_connectable, rssi)
+            return
+
+        # Create a node record from Gauge advertising; repeated-probe advertising will fill in probes later.
+        node = MeatNetNode(None, self, is_connectable, rssi, identifier)
+        node.update_with_gauge_advertising(advertising, is_connectable, rssi)
+        self._add_device(node)
 
     def update_probe_with_advertising(
         self,

@@ -17,6 +17,16 @@ class CombustionProductType(Enum):
     UNKNOWN = 0x00
     PROBE = 0x01
     MEAT_NET_NODE = 0x02
+    # Per upstream Combustion BLE specs (MeatNet/Gauge):
+    # 3 = Gauge, 4 = Display (Timer), 5 = Booster (Charger)
+    GAUGE = 0x03
+    DISPLAY = 0x04
+    BOOSTER = 0x05
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handle unknown product types gracefully."""
+        return cls.UNKNOWN
 
 
 class AdvertisingData(NamedTuple):

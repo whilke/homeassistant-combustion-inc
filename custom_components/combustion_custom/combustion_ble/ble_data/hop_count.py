@@ -12,7 +12,9 @@ class HopCount(Enum):
     HOP4 = 0x03
 
     HOP_COUNT_MASK = 0x3
-    HOP_COUNT_SHIFT = 6
+    # Per the MeatNet Node BLE spec, hop count is stored in bits 1-2 of the
+    # Network Information byte (i.e., the two least-significant bits).
+    HOP_COUNT_SHIFT = 0
 
     @staticmethod
     def from_network_info_byte(network_info_byte):
