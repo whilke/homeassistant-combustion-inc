@@ -17,10 +17,11 @@ class CombustionProductType(Enum):
     UNKNOWN = 0x00
     PROBE = 0x01
     MEAT_NET_NODE = 0x02
-    # Future product types - add as needed
-    TIMER = 0x03
-    CHARGER = 0x04
-    DISPLAY = 0x05
+    # Per upstream Combustion BLE specs (MeatNet/Gauge):
+    # 3 = Gauge, 4 = Display (Timer), 5 = Booster (Charger)
+    GAUGE = 0x03
+    DISPLAY = 0x04
+    BOOSTER = 0x05
 
     @classmethod
     def _missing_(cls, value):

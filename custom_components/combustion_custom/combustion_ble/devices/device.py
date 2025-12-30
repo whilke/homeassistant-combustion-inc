@@ -11,7 +11,8 @@ if TYPE_CHECKING:
 
 class Device:
     MIN_RSSI = -128
-    STALE_TIMEOUT = 15.0
+    # BLE advertisements can be bursty on some hosts; 15s was causing HA availability flapping.
+    STALE_TIMEOUT = 60.0
 
     class ConnectionState:
         DISCONNECTED = "disconnected"
@@ -70,10 +71,10 @@ class Device:
         if self.connection_state == Device.ConnectionState.DISCONNECTED:
             self.firmware_version = None
 
-        if self.maintaining_connection and (
-            self.connection_state == Device.ConnectionState.DISCONNECTED
-            or self.connection_state == Device.ConnectionState.FAILED
-        ):
+        # Important: do NOT auto-retry immediately on FAILED.
+        # A FAILED connect (often due to non-connectable advertising / device busy) can otherwise
+        # cause an infinite reconnect loop that starves scanning and makes HA sensors flap.
+        if self.maintaining_connection and self.connection_state == Device.ConnectionState.DISCONNECTED:
             ensure_future(self.connect(), name="device.connect[update_connection_state]")
 
     def _update_device_stale(self):

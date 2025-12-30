@@ -103,6 +103,10 @@ class Probe(Device):
         self._id = advertising.mode_id.id
         self._color = advertising.mode_id.color
         self._hop_count = advertising.hop_count
+        # "Hops" as an integer suitable for UI:
+        # - 0: direct from probe (either via advertising or direct connection)
+        # - 1..4: repeated via MeatNet (per spec hop-count encoding)
+        self._hops: int | None = None
         self._current_temperatures: Monitorable[Optional[ProbeTemperatures]] = Monitorable(None)
         self._instant_read_celsius: Optional[float] = None
         self._instant_read_fahrenheit: Optional[float] = None
@@ -251,10 +255,14 @@ class Probe(Device):
         ble_identifier: str | None,
     ):
         # Update probe with advertising data
-        if rssi:
+        # Any advertising means we are still "seeing" the probe (directly or via MeatNet).
+        # Keep last_update_time fresh to avoid HA availability flapping.
+        self.last_update_time = datetime.now()
+
+        if rssi is not None:
             self._rssi.update(rssi)
         if is_connectable is not None:
-            self.is_connectable = self.is_connectable
+            self.is_connectable = is_connectable
         if ble_identifier is not None:
             self.ble_identifier = ble_identifier
 
@@ -282,7 +290,12 @@ class Probe(Device):
                         advertising.battery_status_virtual_sensors.virtual_sensors,
                     )
 
-                    self.last_update_time = datetime.now()
+                    # Direct probe advertising should surface as 0 hops.
+                    self._hops = 0 if advertising.type == CombustionProductType.PROBE else (
+                        advertising.hop_count.value + 1
+                    )
+
+                    # last_update_time already updated above
             elif advertising.mode_id.mode == ProbeMode.INSTANT_READ:
                 #  Update Instant Read temperature, providing hop count information to prioritize it.
                 hop_count = None
@@ -296,7 +309,10 @@ class Probe(Device):
                     advertising.battery_status_virtual_sensors.battery_status,
                     hop_count,
                 ):
-                    self.last_update_time = datetime.now()
+                    self._hops = 0 if advertising.type == CombustionProductType.PROBE else (
+                        advertising.hop_count.value + 1
+                    )
+                    # last_update_time already updated above
 
     def _update_id_color_battery(
         self, probe_id: ProbeID, probe_color: ProbeColor, probe_battery_status: BatteryStatus
@@ -409,6 +425,9 @@ class Probe(Device):
         ensure_future(self._request_missing_data(), name="request_missing_data[probe]")
 
         if updated:
+            # Status over a direct probe connection has no hop count => 0.
+            # Status proxied from a node includes hop_count => 1..4.
+            self._hops = 0 if hop_count is None else (hop_count.value + 1)
             current = self._get_current_temperature_log()
             if current:
                 self._update_log_percent()

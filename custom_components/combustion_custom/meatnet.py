@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import dispatcher_send
 
 from .const import EVENT_DISCOVERED
 
+
 class MeatNetManager:
 
     hass: HomeAssistant
@@ -19,8 +20,12 @@ class MeatNetManager:
     deviceManager: DeviceManager
     scanner: BleakScanner
 
+    # Track when a BLE address transitions from generic node -> gauge
+    _device_kind: dict[str, str]
+
     def __init__(self, hass: HomeAssistant):
         self.hass = hass
+        self._device_kind = {}
 
     def worker(self):
 
@@ -30,13 +35,24 @@ class MeatNetManager:
             devices = self.deviceManager.get_devices()
             for device in devices:
                 id = device.unique_identifier
-                if self.devices.get(id) is None:
-                    try:
+                try:
+                    is_gauge = bool(getattr(device, "gauge_serial", None))
+                    kind = "gauge" if is_gauge else "device"
+
+                    if self.devices.get(id) is None:
                         dispatcher_send(self.hass, EVENT_DISCOVERED, device)
                         self.devices[id] = device
-                    except:
-                        pass
-    
+                        self._device_kind[id] = kind
+                        continue
+
+                    # If a MeatNet node later reveals itself to be a Gauge, re-dispatch so
+                    # the HA platform can add Gauge-only entities.
+                    if self._device_kind.get(id) != "gauge" and kind == "gauge":
+                        dispatcher_send(self.hass, EVENT_DISCOVERED, device)
+                        self._device_kind[id] = "gauge"
+                except Exception:
+                    pass
+
     async def async_start(self) -> None:
 
         if (DeviceManager.shared is not None):
@@ -53,7 +69,7 @@ class MeatNetManager:
         self.thread = threading.Thread(target=self.worker)
         self.running = True
         self.thread.start()
-        
+
     async def async_stop(self) -> None:
 
         try:
@@ -62,5 +78,6 @@ class MeatNetManager:
             await self.scanner.stop()
             self.thread.join(2)
             self.devices.clear()
+            self._device_kind.clear()
         except:
             pass

@@ -12,7 +12,8 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 from bleak_retry_connector import establish_connection
 
-from .ble_data.advertising_data import AdvertisingData
+from .ble_data.advertising_data import AdvertisingData, CombustionProductType
+from .ble_data.gauge_advertising_data import GaugeAdvertisingData
 from .ble_data.probe_status import ProbeStatus
 from .const import (
     BT_MANUFACTURER_ID,
@@ -46,6 +47,11 @@ class BleManagerDelegate:
 
     def update_device_with_advertising(
         self, advertising: AdvertisingData, is_connectable: bool, rssi: int, identifier: str
+    ):
+        pass
+
+    def update_device_with_gauge_advertising(
+        self, advertising: GaugeAdvertisingData, is_connectable: bool, rssi: int, identifier: str
     ):
         pass
 
@@ -171,9 +177,26 @@ class BleManager:
         # Store the BLEDevice for use with establish_connection
         self.ble_devices[device.address] = device
 
-        advertising_data = AdvertisingData.from_bleak_data(
-            advertisement_data.manufacturer_data[BT_MANUFACTURER_ID]
-        )
+        msd_payload = advertisement_data.manufacturer_data[BT_MANUFACTURER_ID]
+
+        # Peek product type byte (offset 2 in full MSD, but Bleak omits vendor id).
+        # Full MSD format: [vendor_id(2)][product_type(1)]...
+        if len(msd_payload) < 1:
+            return
+
+        product_type_byte = msd_payload[0]
+        if product_type_byte == CombustionProductType.GAUGE.value:
+            gauge_adv = GaugeAdvertisingData.from_bleak_data(msd_payload)
+            if gauge_adv and self.delegate:
+                self.delegate.update_device_with_gauge_advertising(
+                    advertising=gauge_adv,
+                    is_connectable=True,  # TODO: support non-connectable devices
+                    rssi=advertisement_data.rssi,
+                    identifier=device.address,
+                )
+            return
+
+        advertising_data = AdvertisingData.from_bleak_data(msd_payload)
         if advertising_data and self.delegate:
             self.delegate.update_device_with_advertising(
                 advertising=advertising_data,
