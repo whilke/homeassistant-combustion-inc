@@ -17,11 +17,10 @@ echo "📡 Installing Bluetooth dependencies..."
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
     bluez \
-    bluetooth \
     libbluetooth-dev \
     libdbus-1-dev \
     libglib2.0-dev \
-    dbus
+    libdbus-1-3
 
 # Install Python dependencies
 echo "📦 Installing Python dependencies..."

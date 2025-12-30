@@ -12,7 +12,7 @@
 
 	// Mount D-Bus for Bluetooth
 	"mounts": [
-		"source=/var/run/dbus,target=/var/run/dbus,type=bind"
+		"source=/run/dbus,target=/run/dbus,type=bind,readonly"
 	],
 
 	// Install Bluetooth dependencies
@@ -26,8 +26,9 @@
 	// Post-create setup
 	"postCreateCommand": "bash .devcontainer/post-create.sh",
 
-	// Post-start to ensure D-Bus is available
-	"postStartCommand": "sudo service dbus start 2>/dev/null || true",
+	// IMPORTANT: Do NOT start dbus inside the container when mounting the host
+	// system bus socket. Doing so can replace the socket path and break D-Bus/
+	// Bluetooth on the host. The container should use the host system bus.
 
 	"customizations": {
 		"vscode": {
@@ -58,6 +59,6 @@
 
 	"containerEnv": {
 		"PYTHONPATH": "${containerWorkspaceFolder}",
-		"DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/var/run/dbus/system_bus_socket"
+		"DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/run/dbus/system_bus_socket"
 	}
 }
