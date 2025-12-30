@@ -13,6 +13,6 @@
     }
   ],
   "integration_type": "hub",
-  "requirements": [],
+  "requirements": ["bitstring", "bleak-retry-connector"],
   "version": "1.0.7"
 }

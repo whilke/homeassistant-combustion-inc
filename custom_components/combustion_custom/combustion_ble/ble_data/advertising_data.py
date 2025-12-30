@@ -17,6 +17,15 @@ class CombustionProductType(Enum):
     UNKNOWN = 0x00
     PROBE = 0x01
     MEAT_NET_NODE = 0x02
+    # Future product types - add as needed
+    TIMER = 0x03
+    CHARGER = 0x04
+    DISPLAY = 0x05
+
+    @classmethod
+    def _missing_(cls, value):
+        """Handle unknown product types gracefully."""
+        return cls.UNKNOWN
 
 
 class AdvertisingData(NamedTuple):

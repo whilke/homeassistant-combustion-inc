@@ -10,6 +10,7 @@ from bleak import (
 )
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
+from bleak_retry_connector import establish_connection
 
 from .ble_data.advertising_data import AdvertisingData
 from .ble_data.probe_status import ProbeStatus
@@ -107,6 +108,7 @@ class BleManager:
 
     def __init__(self):
         self.clients: dict[str, BleakClient] = {}
+        self.ble_devices: dict[str, BLEDevice] = {}
         self.scanner: Optional[BleakScanner] = None
         self.delegate: Optional[BleManagerDelegate] = None
         self.device_status_characteristics: dict[str, BleakGATTCharacteristic] = {}
@@ -166,6 +168,9 @@ class BleManager:
         if BT_MANUFACTURER_ID not in advertisement_data.manufacturer_data:
             return
 
+        # Store the BLEDevice for use with establish_connection
+        self.ble_devices[device.address] = device
+
         advertising_data = AdvertisingData.from_bleak_data(
             advertisement_data.manufacturer_data[BT_MANUFACTURER_ID]
         )
@@ -185,18 +190,29 @@ class BleManager:
 
         if identifier in self.clients:
             client = self.clients[identifier]
-        else:
-            client = BleakClient(
-                identifier, disconnected_callback=self.disconnected_callback(identifier)
-            )
+            if client.is_connected:
+                self.delegate.did_connect_to(identifier)
+                return
+
+        ble_device = self.ble_devices.get(identifier)
+        if not ble_device:
+            LOGGER.warning("No BLEDevice found for identifier [%s]", identifier)
+            self.delegate.did_fail_to_connect_to(identifier)
+            return
 
         successful = False
         self._pending_connections.add(identifier)
         try:
-            await client.connect()
+            client = await establish_connection(
+                BleakClient,
+                ble_device,
+                ble_device.name or identifier,
+                disconnected_callback=self.disconnected_callback(identifier),
+            )
             self.clients[identifier] = client
             successful = True
         except Exception as ex:
+            LOGGER.debug("Failed to connect to [%s]: %s", identifier, ex)
             self.delegate.did_fail_to_connect_to(identifier)
         finally:
             self._pending_connections.discard(identifier)
