@@ -46,11 +46,12 @@ class GaugeAdvertisingData(NamedTuple):
             # Keep a deterministic fallback for registry/ids
             serial = serial_bytes.hex().upper()
 
-        # Raw temperature (13-bit packed, 0.1°C steps)
+        # Raw temperature (13-bit packed, 0.1°C steps; -20°C offset)
+        # Encoding per Gauge spec: Temperature = (raw * 0.1) - 20
         # We assume little-endian packing for the 16-bit field and mask to 13 bits.
         raw_temp_field = int.from_bytes(data[13:15], byteorder="little")
         raw_temp = raw_temp_field & 0x1FFF
-        temperature_c = raw_temp * 0.1
+        temperature_c = (raw_temp * 0.1) - 20.0
 
         # Status flags
         flags = data[15]
@@ -58,9 +59,15 @@ class GaugeAdvertisingData(NamedTuple):
         sensor_overheating = bool(flags & 0x02)
         low_battery = bool(flags & 0x04)
 
-        # Alarm status fields (packed; keep raw for now)
-        alarm_low_raw = int.from_bytes(data[17:19], byteorder="little")
-        alarm_high_raw = int.from_bytes(data[19:21], byteorder="little")
+        # Per spec: if sensor is not present, raw temperature value will be 0.
+        if not sensor_present or raw_temp == 0:
+            temperature_c = None
+
+        # Alarm status fields (packed; keep raw status for now)
+        # Encoding per Gauge spec:
+        # - bytes 17..20: packed uint32: high Alarm Status (16 bits), then low Alarm Status (16 bits)
+        alarm_high_raw = int.from_bytes(data[17:19], byteorder="little")
+        alarm_low_raw = int.from_bytes(data[19:21], byteorder="little")
 
         return GaugeAdvertisingData(
             type=product_type,

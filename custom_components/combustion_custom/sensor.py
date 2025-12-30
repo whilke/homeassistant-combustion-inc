@@ -76,9 +76,75 @@ NODE_SENSOR_TYPES = {
         "gauge_overheating",
         ["OK", "OVERHEATING"],
     ],
-    "gauge_alarm_low_raw": ["Gauge Alarm Low (raw)", None, "", "gauge_alarm_low_raw"],
-    "gauge_alarm_high_raw": ["Gauge Alarm High (raw)", None, "", "gauge_alarm_high_raw"],
+    "gauge_alarm_high_state": [
+        "Gauge High Alarm State",
+        None,
+        SensorDeviceClass.ENUM,
+        "gauge_alarm_high_state",
+        ["OFF", "SET", "TRIPPED", "ALARMING"],
+    ],
+    "gauge_alarm_low_state": [
+        "Gauge Low Alarm State",
+        None,
+        SensorDeviceClass.ENUM,
+        "gauge_alarm_low_state",
+        ["OFF", "SET", "TRIPPED", "ALARMING"],
+    ],
+    "gauge_alarm_low_temp": ["Gauge Alarm Low", "temp", "temperature", "gauge_alarm_low_temp"],
+    "gauge_alarm_high_temp": ["Gauge Alarm High", "temp", "temperature", "gauge_alarm_high_temp"],
 }
+
+
+def _decode_gauge_alarm_status_to_temperature_c(alarm_status: int | None) -> float | None:
+    """Decode the Gauge 'Alarm Status' packed 16-bit field to a threshold temperature in °C.
+
+    Gauge spec (bit 1 is LSB):
+      - Bit 1: Set
+      - Bit 2: Tripped
+      - Bit 3: Alarming
+      - Bits 4-16: Alarm Temperature (13-bit) encoded like Raw Temperature Data
+        Temperature = (raw * 0.1) - 20
+    """
+    if alarm_status is None:
+        return None
+
+    is_set = bool(alarm_status & 0x0001)
+    if not is_set:
+        return None
+
+    raw_temp = (alarm_status >> 3) & 0x1FFF
+    if raw_temp == 0:
+        return None
+
+    return (raw_temp * 0.1) - 20.0
+
+
+def _decode_gauge_alarm_status_flags(alarm_status: int | None) -> dict[str, bool] | None:
+    if alarm_status is None:
+        return None
+    return {
+        "set": bool(alarm_status & 0x0001),
+        "tripped": bool(alarm_status & 0x0002),
+        "alarming": bool(alarm_status & 0x0004),
+    }
+
+
+def _decode_gauge_alarm_status_to_state(alarm_status: int | None) -> str | None:
+    """Return a single HA-friendly alarm state from the packed Alarm Status flags."""
+    if alarm_status is None:
+        return None
+
+    flags = _decode_gauge_alarm_status_flags(alarm_status)
+    if not flags:
+        return None
+
+    if not flags["set"]:
+        return "OFF"
+    if flags["alarming"]:
+        return "ALARMING"
+    if flags["tripped"]:
+        return "TRIPPED"
+    return "SET"
 
 
 def format_device_name(device: Device):
@@ -153,8 +219,10 @@ async def async_setup_entry(
                     "gauge_sensor_present",
                     "gauge_low_battery",
                     "gauge_overheating",
-                    "gauge_alarm_low_raw",
-                    "gauge_alarm_high_raw",
+                    "gauge_alarm_high_state",
+                    "gauge_alarm_low_state",
+                    "gauge_alarm_low_temp",
+                    "gauge_alarm_high_temp",
                 ]:
                     type_data = NODE_SENSOR_TYPES[sensor_type]
                     name = f"Combustion {type_data[0]} {format_device_name(device)}"
@@ -370,16 +438,27 @@ class CombustionNodeEntity(SensorEntity):
         if state_id == "gauge_overheating":
             over = getattr(self.device, "gauge_sensor_overheating", None)
             return None if over is None else ("OVERHEATING" if over else "OK")
-        if state_id == "gauge_alarm_low_raw":
-            return getattr(self.device, "gauge_alarm_low_raw", None)
-        if state_id == "gauge_alarm_high_raw":
-            return getattr(self.device, "gauge_alarm_high_raw", None)
+        if state_id == "gauge_alarm_high_state":
+            alarm_status = getattr(self.device, "gauge_alarm_high_raw", None)
+            return _decode_gauge_alarm_status_to_state(alarm_status)
+        if state_id == "gauge_alarm_low_state":
+            alarm_status = getattr(self.device, "gauge_alarm_low_raw", None)
+            return _decode_gauge_alarm_status_to_state(alarm_status)
+        if state_id == "gauge_alarm_low_temp":
+            alarm_status = getattr(self.device, "gauge_alarm_low_raw", None)
+            temp_c = _decode_gauge_alarm_status_to_temperature_c(alarm_status)
+            return convert_temp(temp_c, self.unit_type)
+        if state_id == "gauge_alarm_high_temp":
+            alarm_status = getattr(self.device, "gauge_alarm_high_raw", None)
+            temp_c = _decode_gauge_alarm_status_to_temperature_c(alarm_status)
+            return convert_temp(temp_c, self.unit_type)
 
         return None
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         attribs: dict[str, str] = {"last_seen": self.device.last_update_time}
+
         if self.sensor_type_data[2] != SensorDeviceClass.ENUM:
             attribs["state_class"] = "measurement"
         else:
@@ -388,26 +467,34 @@ class CombustionNodeEntity(SensorEntity):
         if getattr(self.device, "gauge_serial", None):
             attribs["gauge_serial"] = self.device.gauge_serial
 
-        return attribs
-
-    async def async_update(self) -> None:
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str]:
-        attribs = {
-            "last_seen": self.device.last_update_time}
-
-        if (self.sensor_type_data[2] != SensorDeviceClass.ENUM):
-            attribs["state_class"] = "measurement"
-        else:
-            attribs["options"] = self.sensor_type_data[4]
-
+        # Add best-RSSI metadata for the RSSI sensor
         if self.sensor_type_data[0] == "RSSI":
-            sorted_rssi = sorted(self.device.device_manager.devices.items(), key=lambda x: x[1].rssi, reverse=True)
+            sorted_rssi = sorted(
+                self.device.device_manager.devices.items(), key=lambda x: x[1].rssi, reverse=True
+            )
             rssi = sorted_rssi[0][1].rssi
             attribs["best_rssi"] = rssi
             attribs["hops"] = getattr(self.device, "_hops", None)
+
+        # Add decoded alarm flags for gauge alarm sensors
+        if self.sensor_type_data[3] in (
+            "gauge_alarm_low_temp",
+            "gauge_alarm_high_temp",
+            "gauge_alarm_low_state",
+            "gauge_alarm_high_state",
+        ):
+            alarm_status_attr = (
+                "gauge_alarm_low_raw"
+                if self.sensor_type_data[3] in ("gauge_alarm_low_temp", "gauge_alarm_low_state")
+                else "gauge_alarm_high_raw"
+            )
+            alarm_status = getattr(self.device, alarm_status_attr, None)
+            flags = _decode_gauge_alarm_status_flags(alarm_status)
+            if flags is not None:
+                attribs["alarm_set"] = flags["set"]
+                attribs["alarm_tripped"] = flags["tripped"]
+                attribs["alarm_alarming"] = flags["alarming"]
+                attribs["alarm_status_raw"] = alarm_status
 
         return attribs
 

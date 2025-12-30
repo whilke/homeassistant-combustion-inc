@@ -3,33 +3,31 @@
 {
 	"name": "Home Assistant Custom Component Dev",
 	"image": "mcr.microsoft.com/devcontainers/python:1-3.13-bookworm",
-
 	// Bluetooth support - requires host system access
 	"runArgs": [
 		"--privileged",
-		"-e", "GIT_EDITOR=code --wait"
+		"--cap-add=NET_ADMIN",
+		"--cap-add=NET_RAW",
+		"-e",
+		"GIT_EDITOR=code --wait"
 	],
-
 	// Mount D-Bus for Bluetooth
 	"mounts": [
 		"source=/run/dbus,target=/run/dbus,type=bind,readonly"
 	],
-
 	// Install Bluetooth dependencies
 	"features": {
 		"ghcr.io/devcontainers/features/common-utils:2": {}
 	},
-
 	// Port mapping for Home Assistant (use appPort for Docker-native mapping)
-	"appPort": ["8123:8123"],
-
+	"appPort": [
+		"8123:8123"
+	],
 	// Post-create setup
 	"postCreateCommand": "bash .devcontainer/post-create.sh",
-
 	// IMPORTANT: Do NOT start dbus inside the container when mounting the host
 	// system bus socket. Doing so can replace the socket path and break D-Bus/
 	// Bluetooth on the host. The container should use the host system bus.
-
 	"customizations": {
 		"vscode": {
 			"extensions": [
@@ -52,11 +50,12 @@
 				"editor.formatOnSave": true,
 				"files.trimTrailingWhitespace": true,
 				"python.testing.pytestEnabled": true,
-				"python.testing.pytestArgs": ["tests"]
+				"python.testing.pytestArgs": [
+					"tests"
+				]
 			}
 		}
 	},
-
 	"containerEnv": {
 		"PYTHONPATH": "${containerWorkspaceFolder}",
 		"DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/run/dbus/system_bus_socket"
